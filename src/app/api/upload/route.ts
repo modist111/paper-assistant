@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { runIndexPipeline } from "@/lib/pdf";
 
@@ -8,6 +7,9 @@ const ALLOWED_MIME_TYPES = ["application/pdf"];
 
 /** 最大文件大小：20MB */
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
+
+/** 演示用户 ID（开发阶段使用，无认证模式） */
+const DEMO_USER_ID = "00000000-0000-0000-0000-000000000000";
 
 /**
  * POST /api/upload
@@ -24,21 +26,6 @@ const MAX_FILE_SIZE = 20 * 1024 * 1024;
  */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
-
-    // 认证
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: "请先登录" },
-        { status: 401 }
-      );
-    }
-
     // 解析 multipart form data
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
@@ -68,10 +55,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 构建存储路径: {user_id}/{timestamp}_{filename}
+    // 构建存储路径
     const timestamp = Date.now();
     const safeFilename = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const storagePath = `${user.id}/${timestamp}_${safeFilename}`;
+    const storagePath = `${DEMO_USER_ID}/${timestamp}_${safeFilename}`;
 
     // 上传到 Supabase Storage
     const fileBuffer = Buffer.from(await file.arrayBuffer());
@@ -91,13 +78,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 创建数据库记录
+    // 创建数据库记录（使用 admin 客户端绕过 RLS）
     const paperTitle = file.name.replace(/\.pdf$/i, "");
 
-    const { data: paper, error: insertError } = await supabase
+    const { data: paper, error: insertError } = await supabaseAdmin
       .from("documents")
       .insert({
-        user_id: user.id,
+        user_id: DEMO_USER_ID,
         title: paperTitle,
         filename: file.name,
         storage_path: storagePath,
@@ -120,7 +107,6 @@ export async function POST(request: NextRequest) {
     }
 
     // 异步触发索引流水线（不等待完成，立即返回响应）
-    // 用户可以通过轮询 GET /api/papers/[id] 查看处理状态
     runIndexPipeline({
       documentId: paper.id,
       pdfBuffer: fileBuffer,

@@ -31,20 +31,53 @@ export async function embedText(text: string): Promise<number[]> {
 }
 
 /**
- * 批量将多段文本向量化
+ * 批量将多段文本向量化（带限速重试）
  * @param texts - 文本数组
  * @returns 二维 embedding 数组
  */
 export async function embedTexts(texts: string[]): Promise<number[][]> {
-  const response = await embeddingClient.embeddings.create({
-    model: EMBEDDING_MODEL,
-    input: texts,
-  });
+  // 尝试批量请求，失败则逐条重试
+  try {
+    const response = await embeddingClient.embeddings.create({
+      model: EMBEDDING_MODEL,
+      input: texts,
+    });
 
-  // 按输入顺序排序
-  return response.data
-    .sort((a, b) => a.index - b.index)
-    .map((item) => item.embedding);
+    return response.data
+      .sort((a, b) => a.index - b.index)
+      .map((item) => item.embedding);
+  } catch (batchError) {
+    const errMsg = batchError instanceof Error ? batchError.message : "";
+    console.warn(`[Embed] 批量向量化失败 (${errMsg})，切换逐条模式...`);
+
+    // 逐条向量化，每条间隔 200ms
+    const results: number[][] = [];
+    for (let i = 0; i < texts.length; i++) {
+      let retries = 3;
+      while (retries > 0) {
+        try {
+          const emb = await embedText(texts[i]);
+          results.push(emb);
+          break;
+        } catch (singleError) {
+          retries--;
+          if (retries === 0) {
+            console.error(`[Embed] 第 ${i + 1} 条向量化最终失败:`, singleError);
+            // 返回零向量作为占位（1024 维）
+            results.push(new Array(1024).fill(0));
+          } else {
+            // 等 3 秒后重试
+            await new Promise((r) => setTimeout(r, 3000));
+          }
+        }
+      }
+      // 每条间隔 200ms
+      if (i < texts.length - 1) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    }
+    return results;
+  }
 }
 
 export { embeddingClient };

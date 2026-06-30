@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, use } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -10,7 +11,7 @@ import { Separator } from "@/components/ui/separator";
 import { formatDate, formatFileSize } from "@/lib/utils";
 import type { Paper } from "@/types";
 
-export default function PaperDetailPage({
+function PaperDetailContent({
   params,
 }: {
   params: Promise<{ id: string }>;
@@ -55,7 +56,7 @@ export default function PaperDetailPage({
       } catch {
         // 忽略轮询错误
       }
-    }, 3000); // 每 3 秒检查一次
+    }, 3000);
 
     return () => clearInterval(interval);
   }, [paper?.status, id]);
@@ -220,3 +221,10 @@ function StatusBadge({ status }: { status: Paper["status"] }) {
       return <Badge variant="destructive">失败</Badge>;
   }
 }
+
+// 禁用 SSR 避免 Windows spawn EPERM
+const PaperDetailPage = dynamic(() => Promise.resolve(PaperDetailContent), {
+  ssr: false,
+});
+
+export default PaperDetailPage;

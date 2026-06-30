@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 /**
@@ -11,22 +10,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = await createClient();
     const { id } = await params;
 
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: "请先登录" },
-        { status: 401 }
-      );
-    }
-
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from("documents")
       .select("*")
       .eq("id", id)
@@ -53,31 +39,16 @@ export async function GET(
 /**
  * DELETE /api/papers/[id]
  * 删除论文及其关联数据（chunks + storage 文件）
- *
- * 使用 admin client 确保可以删除 storage 文件（绕过 RLS）
  */
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = await createClient();
     const { id } = await params;
 
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: "请先登录" },
-        { status: 401 }
-      );
-    }
-
-    // 首先获取论文信息（确认所有权 + 获取 storage_path）
-    const { data: paper, error: fetchError } = await supabase
+    // 首先获取论文信息（获取 storage_path）
+    const { data: paper, error: fetchError } = await supabaseAdmin
       .from("documents")
       .select("*")
       .eq("id", id)
@@ -104,7 +75,7 @@ export async function DELETE(
     }
 
     // 删除数据库记录（document_chunks 通过 CASCADE 自动删除）
-    const { error: deleteError } = await supabase
+    const { error: deleteError } = await supabaseAdmin
       .from("documents")
       .delete()
       .eq("id", id);
