@@ -4,7 +4,8 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.4-38bdf8?logo=tailwind-css)](https://tailwindcss.com/)
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL%2Bpgvector-3ecf8e?logo=supabase)](https://supabase.com/)
-[![OpenAI](https://img.shields.io/badge/OpenAI-gpt--4o%2Bembedding-412991?logo=openai)](https://openai.com/)
+[![DeepSeek](https://img.shields.io/badge/LLM-DeepSeek_V3-4B8BF5)](https://www.deepseek.com/)
+[![BGE](https://img.shields.io/badge/Embedding-BGE_Large-FF6B6B)](https://huggingface.co/BAAI/bge-large-zh-v1.5)
 
 一个基于 **RAG（检索增强生成）** 的学术论文智能问答 Web 应用。上传 PDF 论文后，AI 自动解析、分块、向量化，然后你可以用自然语言对论文内容进行提问，获得精确带来源引用的回答。
 
@@ -56,11 +57,11 @@
                      │
      ┌───────────────┼───────────────┐
      ▼               ▼               ▼
-┌─────────┐  ┌──────────────┐  ┌──────────┐
-│ Supabase│  │  Supabase    │  │  OpenAI  │
-│PostgreSQL│  │  Storage     │  │  API     │
-│+pgvector│  │  (PDFs)      │  │          │
-└─────────┘  └──────────────┘  └──────────┘
+┌─────────┐  ┌──────────────┐  ┌──────────────┐
+│ Supabase│  │  Supabase    │  │ 硅基流动 API  │
+│PostgreSQL│  │  Storage     │  │ DeepSeek-V3  │
+│+pgvector│  │  (PDFs)      │  │ BGE-Large-ZH │
+└─────────┘  └──────────────┘  └──────────────┘
 ```
 
 ### 技术栈
@@ -70,11 +71,10 @@
 | 框架 | Next.js 15 (App Router) | React Server Components, Server Actions, API Routes |
 | 语言 | TypeScript (strict) | 全栈类型安全 |
 | 样式 | Tailwind CSS 3.4 + shadcn/ui | 设计系统 & UI 组件 |
-| 数据库 | Supabase (PostgreSQL + pgvector) | 结构化数据 + 向量存储 + 全文搜索 |
+| 数据库 | Supabase (PostgreSQL + pgvector) | 结构化数据 + 向量存储 |
 | 文件存储 | Supabase Storage | PDF 文件安全存储 |
-| AI SDK | OpenAI SDK + Vercel AI SDK | 流式 LLM 响应 |
-| Embedding | OpenAI text-embedding-3-small (1536d) | 文本向量化 |
-| LLM | OpenAI gpt-4o | RAG 问答生成 |
+| LLM | DeepSeek-V3 (via 硅基流动) | RAG 问答生成（支持 OpenAI/DeepSeek/任何兼容 API） |
+| Embedding | BGE-Large-ZH (via 硅基流动) | 文本向量化 (1024d)（支持 OpenAI/任何兼容 API） |
 | PDF 解析 | pdf-parse | 纯 JS PDF 文本提取 |
 | 分块 | @langchain/textsplitters | RecursiveCharacterTextSplitter |
 
@@ -84,14 +84,14 @@
 📥 索引阶段（上传时执行一次）：
   PDF → pdf-parse 提取文本
       → RecursiveCharacterTextSplitter (chunk_size=1000, overlap=200)
-      → text-embedding-3-small 向量化 (1536d)
+      → BGE-Large-ZH 向量化 (1024d)
       → pgvector 存储 (IVFFlat 索引)
 
 💬 问答阶段（每次提问执行）：
-  用户问题 → text-embedding-3-small 向量化
+  用户问题 → BGE-Large-ZH 向量化
            → pgvector cosine 相似度搜索 (topK=5, threshold=0.7)
            → 拼接上下文 + 构建 RAG System Prompt
-           → gpt-4o 流式生成 (temperature=0.3)
+           → DeepSeek-V3 流式生成 (temperature=0.3)
            → SSE 流式返回答案 + 来源引用
 ```
 
