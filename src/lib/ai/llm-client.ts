@@ -18,6 +18,8 @@ export const llmClient = new OpenAI({
     process.env.LLM_API_BASE_URL ||
     process.env.OPENAI_API_BASE_URL ||
     "https://api.openai.com/v1",
+  timeout: 45_000,
+  maxRetries: 0,
 });
 
 /**

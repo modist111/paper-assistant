@@ -58,6 +58,11 @@ export function useChat({
       // 创建 AbortController
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
+      let timedOut = false;
+      const timeoutId = setTimeout(() => {
+        timedOut = true;
+        abortController.abort();
+      }, 90_000);
 
       try {
         // 构建对话历史
@@ -89,6 +94,8 @@ export function useChat({
 
         const decoder = new TextDecoder();
         let assistantContent = "";
+        let messageSources: SourceReference[] = [];
+        let receivedDone = false;
 
         // 创建占位消息
         const assistantId = `assistant_${Date.now()}`;
@@ -116,50 +123,57 @@ export function useChat({
             if (!trimmed.startsWith("data: ")) continue;
 
             const jsonStr = trimmed.slice(6);
+            let event: { type?: string; content?: string; sources?: SourceReference[]; message?: string };
             try {
-              const event = JSON.parse(jsonStr);
-
-              if (event.type === "sources") {
-                setSources(event.sources || []);
-              } else if (event.type === "chunk") {
-                assistantContent += event.content;
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === assistantId
-                      ? { ...m, content: assistantContent }
-                      : m
-                  )
-                );
-              } else if (event.type === "done") {
-                // 流结束
-              } else if (event.type === "error") {
-                throw new Error(event.message || "生成失败");
-              }
+              event = JSON.parse(jsonStr);
             } catch {
-              // 解析失败的行，跳过
+              continue;
+            }
+
+            if (event.type === "sources") {
+              messageSources = event.sources || [];
+              setSources(messageSources);
+            } else if (event.type === "chunk") {
+              assistantContent += event.content || "";
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId ? { ...m, content: assistantContent } : m
+                )
+              );
+            } else if (event.type === "done") {
+              receivedDone = true;
+            } else if (event.type === "error") {
+              throw new Error(event.message || "生成失败");
             }
           }
         }
+
+        if (!receivedDone) throw new Error("回答流意外中断，请重试");
 
         // 更新最终消息
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
-              ? { ...m, content: assistantContent, sources }
+              ? { ...m, content: assistantContent, sources: messageSources }
               : m
           )
         );
       } catch (err) {
+        if (timedOut) {
+          setError("回答超时，请检查 LLM_API_BASE_URL、LLM_MODEL 和网络连接");
+          return;
+        }
         if ((err as Error).name === "AbortError") return;
         const message =
           err instanceof Error ? err.message : "发送失败";
         setError(message);
       } finally {
+        clearTimeout(timeoutId);
         setIsLoading(false);
         abortControllerRef.current = null;
       }
     },
-    [paperId, messages, isLoading, sources]
+    [paperId, messages, isLoading]
   );
 
   const clearMessages = useCallback(() => {

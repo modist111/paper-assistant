@@ -1,4 +1,4 @@
-import { embedText } from "./embed";
+import { embedText, EMBEDDING_MODEL } from "./embed";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { RetrievalResult } from "@/types";
 
@@ -13,6 +13,8 @@ export interface RetrieveOptions {
   /** 相似度阈值（0-1），低于此值的结果被过滤 */
   similarityThreshold?: number;
 }
+
+export const DEFAULT_SIMILARITY_THRESHOLD = EMBEDDING_MODEL === "BAAI/bge-m3" ? 0.6 : 0.7;
 
 /**
  * 使用向量相似度检索最相关的论文片段
@@ -33,7 +35,7 @@ export async function retrieveRelevantChunks(
   const {
     documentId,
     limit = 5,
-    similarityThreshold = 0.7,
+    similarityThreshold = DEFAULT_SIMILARITY_THRESHOLD,
   } = options;
 
   // 步骤 1: 向量化查询

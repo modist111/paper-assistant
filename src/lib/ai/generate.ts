@@ -1,5 +1,5 @@
 import { llmClient, LLM_MODEL } from "./llm-client";
-import { retrieveRelevantChunks } from "./retrieve";
+import { retrieveRelevantChunks, DEFAULT_SIMILARITY_THRESHOLD } from "./retrieve";
 import type { SourceReference } from "@/types";
 
 /**
@@ -75,7 +75,7 @@ export async function generateRagAnswer(
     question,
     history = [],
     topK = 5,
-    similarityThreshold = 0.7,
+    similarityThreshold = DEFAULT_SIMILARITY_THRESHOLD,
   } = options;
 
   // 步骤 1: 检索相关片段

@@ -37,7 +37,6 @@ export async function POST(request: NextRequest) {
     const retrievalResults = await retrieveRelevantChunks(question, {
       documentId: paperId,
       limit: 5,
-      similarityThreshold: 0.7,
     });
 
     // 构建来源引用
@@ -49,14 +48,12 @@ export async function POST(request: NextRequest) {
     }));
 
     if (retrievalResults.length === 0) {
-      const stream = createSSEStream();
-      stream.send("chunk", {
-        content:
-          "抱歉，在论文中没有找到与您问题相关的片段。请尝试换一种方式提问。",
-      });
-      stream.send("sources", { sources: [] });
-      stream.send("done", {});
-      return stream.close();
+      return new Response(
+        `data: ${JSON.stringify({ type: "chunk", content: "抱歉，在论文中没有找到与您问题相关的片段。请尝试换一种方式提问。" })}\n\n` +
+          `data: ${JSON.stringify({ type: "sources", sources: [] })}\n\n` +
+          `data: ${JSON.stringify({ type: "done" })}\n\n`,
+        { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } }
+      );
     }
 
     // 步骤 2: 构建 RAG Prompt
@@ -150,47 +147,4 @@ ${context}
       headers: { "Content-Type": "application/json" },
     });
   }
-}
-
-// ============================================================
-// SSE 辅助工具（用于非流式场景的错误/空结果响应）
-// ============================================================
-
-interface SSEStream {
-  send: (type: string, data: Record<string, unknown>) => void;
-  close: () => Response;
-}
-
-function createSSEStream(): SSEStream {
-  const encoder = new TextEncoder();
-  let closed = false;
-
-  const stream = new ReadableStream({
-    start(controller) {
-      // 内部引用，在 send 中使用
-      (stream as any)._controller = controller;
-    },
-  });
-
-  return {
-    send(type: string, data: Record<string, unknown>) {
-      if (closed) return;
-      const event = `data: ${JSON.stringify({ type, ...data })}\n\n`;
-      ((stream as any)._controller as ReadableStreamDefaultController)?.enqueue(
-        encoder.encode(event)
-      );
-    },
-    close() {
-      if (closed) return new Response("Already closed");
-      closed = true;
-      ((stream as any)._controller as ReadableStreamDefaultController)?.close();
-      return new Response(stream, {
-        headers: {
-          "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache",
-          Connection: "keep-alive",
-        },
-      });
-    },
-  };
 }
