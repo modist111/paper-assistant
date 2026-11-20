@@ -48,7 +48,7 @@ export function PdfUploader() {
         const data = await res.json();
 
         if (!res.ok) {
-          throw new Error(data.error || "上传失败");
+          throw new Error(data.details || data.error || "上传失败");
         }
 
         setProgress("上传成功，正在解析论文...");

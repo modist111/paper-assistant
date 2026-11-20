@@ -1,12 +1,15 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { runIndexPipeline } from "@/lib/pdf";
+import { assertEmbeddingConfigured } from "@/lib/ai/embed";
 
 /** 允许的文件类型 */
 const ALLOWED_MIME_TYPES = ["application/pdf"];
 
 /** 最大文件大小：20MB */
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
+
+export const maxDuration = 300;
 
 /** 演示用户 ID（开发阶段使用，无认证模式） */
 const DEMO_USER_ID = "00000000-0000-0000-0000-000000000000";
@@ -52,6 +55,18 @@ export async function POST(request: NextRequest) {
           error: `文件大小超过限制 (最大 20MB)，当前: ${(file.size / 1024 / 1024).toFixed(1)}MB`,
         },
         { status: 400 }
+      );
+    }
+
+    try {
+      assertEmbeddingConfigured();
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: "Embedding 服务未配置",
+          details: error instanceof Error ? error.message : "请检查 Embedding 配置",
+        },
+        { status: 503 }
       );
     }
 
@@ -106,15 +121,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 异步触发索引流水线（不等待完成，立即返回响应）
-    runIndexPipeline({
-      documentId: paper.id,
-      pdfBuffer: fileBuffer,
-    }).catch((err) => {
-      console.error(
-        `[POST /api/upload] 后台索引失败 (paperId=${paper.id}):`,
-        err
-      );
+    // 让 Next.js 在响应发送后继续等待索引任务
+    after(async () => {
+      try {
+        const result = await runIndexPipeline({
+          documentId: paper.id,
+          pdfBuffer: fileBuffer,
+        });
+        if (!result.success) {
+          console.error("[POST /api/upload] 索引失败 (paperId=" + paper.id + "): " + result.error);
+        }
+      } catch (error) {
+        console.error("[POST /api/upload] 后台索引异常 (paperId=" + paper.id + "):", error);
+      }
     });
 
     return NextResponse.json(

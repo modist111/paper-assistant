@@ -1,6 +1,6 @@
 import { parsePdfBuffer } from "./parse";
 import { chunkText, type TextChunk } from "./chunk";
-import { embedTexts } from "@/lib/ai/embed";
+import { embedTexts, EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } from "@/lib/ai/embed";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { PaperStatus } from "@/types";
 
@@ -85,6 +85,10 @@ export async function runIndexPipeline(
       const batchNum = Math.floor(i / BATCH_SIZE) + 1;
       console.log(`[IndexPipeline] 步骤3: 向量化批次 ${batchNum} (${texts.length} 个文本)...`);
       const embeddings = await embedTexts(texts);
+      const invalidEmbedding = embeddings.find((embedding) => embedding.length !== EMBEDDING_DIMENSIONS);
+      if (invalidEmbedding) {
+        throw new Error("Embedding 输出维度为 " + invalidEmbedding.length + "，数据库要求 " + EMBEDDING_DIMENSIONS);
+      }
       console.log(`[IndexPipeline] 步骤3: 向量化完成 — ${embeddings.length} 个向量`);
 
       // 批次间延迟 500ms，避免 API 限速
@@ -102,6 +106,7 @@ export async function runIndexPipeline(
         metadata: {
           start_char: chunk.metadata.startChar,
           end_char: chunk.metadata.endChar,
+          embedding_model: EMBEDDING_MODEL,
         },
       }));
 
@@ -117,14 +122,21 @@ export async function runIndexPipeline(
     }
 
     // 步骤 5: 更新文档状态
-    await supabaseAdmin
+    const { data: readyDocument, error: readyError } = await supabaseAdmin
       .from("documents")
       .update({
         status: "ready" as PaperStatus,
         title,
         page_count: parsed.pageCount,
+        error_message: null,
       })
-      .eq("id", documentId);
+      .eq("id", documentId)
+      .select("id")
+      .single();
+
+    if (readyError || !readyDocument) {
+      throw new Error("更新论文完成状态失败: " + (readyError?.message || "未找到文档"));
+    }
 
     return {
       success: true,
@@ -163,13 +175,19 @@ async function updateStatus(
   status: PaperStatus,
   errorMessage?: string
 ) {
-  await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from("documents")
     .update({
       status,
       error_message: errorMessage || null,
     })
-    .eq("id", documentId);
+    .eq("id", documentId)
+    .select("id")
+    .single();
+
+  if (error || !data) {
+    throw new Error("更新论文状态失败: " + (error?.message || "未找到文档"));
+  }
 }
 
 export { parsePdfBuffer, chunkText };
