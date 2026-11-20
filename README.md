@@ -4,8 +4,6 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.4-38bdf8?logo=tailwind-css)](https://tailwindcss.com/)
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL%2Bpgvector-3ecf8e?logo=supabase)](https://supabase.com/)
-[![DeepSeek](https://img.shields.io/badge/LLM-DeepSeek_V3-4B8BF5)](https://www.deepseek.com/)
-[![BGE](https://img.shields.io/badge/Embedding-BGE_Large-FF6B6B)](https://huggingface.co/BAAI/bge-large-zh-v1.5)
 
 一个基于 **RAG（检索增强生成）** 的学术论文智能问答 Web 应用。上传 PDF 论文后，AI 自动解析、分块、向量化，然后你可以用自然语言对论文内容进行提问，获得精确带来源引用的回答。
 
@@ -30,9 +28,9 @@
 
 - **📄 PDF 解析** — 自动提取文本，支持学术论文（文字型 PDF）
 - **🧠 语义分块** — RecursiveCharacterTextSplitter 智能分块，保留段落和句子完整性
-- **🔢 向量检索** — OpenAI text-embedding-3-small + pgvector，高精度语义搜索
+- **🔢 向量检索** — OpenAI text-embedding-3-small + pgvector，按余弦相似度搜索
 - **💬 流式问答** — gpt-4o RAG 生成，SSE 流式响应，逐字显示
-- **📎 来源追溯** — 每个回答都附带引用片段、相似度评分、页码范围
+- **📎 来源引用** — 回答附带检索片段和相似度评分
 - **🔄 多轮对话** — 支持对话历史上下文，可追问、深入探讨
 - **🎨 现代 UI** — Tailwind CSS + shadcn/ui，支持亮色/暗色主题
 
@@ -58,9 +56,9 @@
      ┌───────────────┼───────────────┐
      ▼               ▼               ▼
 ┌─────────┐  ┌──────────────┐  ┌──────────────┐
-│ Supabase│  │  Supabase    │  │ 硅基流动 API  │
-│PostgreSQL│  │  Storage     │  │ DeepSeek-V3  │
-│+pgvector│  │  (PDFs)      │  │ BGE-Large-ZH │
+│ Supabase│  │  Supabase    │  │  OpenAI API  │
+│PostgreSQL│  │  Storage     │  │   gpt-4o     │
+│+pgvector│  │  (PDFs)      │  │  Embedding   │
 └─────────┘  └──────────────┘  └──────────────┘
 ```
 
@@ -68,13 +66,13 @@
 
 | 层 | 技术 | 用途 |
 |---|---|---|
-| 框架 | Next.js 15 (App Router) | React Server Components, Server Actions, API Routes |
+| 框架 | Next.js 15 (App Router) | React Server Components, Route Handlers |
 | 语言 | TypeScript (strict) | 全栈类型安全 |
 | 样式 | Tailwind CSS 3.4 + shadcn/ui | 设计系统 & UI 组件 |
 | 数据库 | Supabase (PostgreSQL + pgvector) | 结构化数据 + 向量存储 |
 | 文件存储 | Supabase Storage | PDF 文件安全存储 |
-| LLM | DeepSeek-V3 (via 硅基流动) | RAG 问答生成（支持 OpenAI/DeepSeek/任何兼容 API） |
-| Embedding | BGE-Large-ZH (via 硅基流动) | 文本向量化 (1024d)（支持 OpenAI/任何兼容 API） |
+| LLM | OpenAI gpt-4o（默认） | RAG 问答生成（可配置兼容 API） |
+| Embedding | OpenAI text-embedding-3-small（默认） | 文本向量化（数据库要求 1536 维） |
 | PDF 解析 | pdf-parse | 纯 JS PDF 文本提取 |
 | 分块 | @langchain/textsplitters | RecursiveCharacterTextSplitter |
 
@@ -84,14 +82,14 @@
 📥 索引阶段（上传时执行一次）：
   PDF → pdf-parse 提取文本
       → RecursiveCharacterTextSplitter (chunk_size=1000, overlap=200)
-      → BGE-Large-ZH 向量化 (1024d)
+      → text-embedding-3-small 向量化 (1536d)
       → pgvector 存储 (IVFFlat 索引)
 
 💬 问答阶段（每次提问执行）：
-  用户问题 → BGE-Large-ZH 向量化
+  用户问题 → text-embedding-3-small 向量化
            → pgvector cosine 相似度搜索 (topK=5, threshold=0.7)
            → 拼接上下文 + 构建 RAG System Prompt
-           → DeepSeek-V3 流式生成 (temperature=0.3)
+           → gpt-4o 流式生成 (temperature=0.3)
            → SSE 流式返回答案 + 来源引用
 ```
 
@@ -178,6 +176,17 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=你的anon key
 SUPABASE_SERVICE_ROLE_KEY=你的service role key
 ```
 
+上传后的索引还需要有效的 Embedding 密钥，不要保留示例值 sk-your-openai-key。
+默认使用 text-embedding-3-small（1536 维）。若使用其他兼容服务，请同时配置
+EMBEDDING_API_KEY、EMBEDDING_API_BASE_URL、EMBEDDING_MODEL 和 EMBEDDING_DIMENSIONS。
+例如使用硅基流动时，LLM_API_BASE_URL 设置为 https://api.siliconflow.cn/v1，
+LLM_MODEL 可设置为 Qwen/Qwen2.5-7B-Instruct，并分别配置有效的 LLM_API_KEY 和 EMBEDDING_API_KEY。
+BAAI/bge-m3 返回 1024 维；将 EMBEDDING_API_BASE_URL 设置为 https://api.siliconflow.cn/v1，
+EMBEDDING_MODEL 设置为 BAAI/bge-m3，EMBEDDING_DIMENSIONS 设置为 1024，并确保数据库的
+document_chunks.embedding 列与 search_document_chunks 参数都是 VECTOR(1024)。
+仓库初始化 SQL 默认 1536 维。新建数据库若使用 bge-m3，请在执行初始化 SQL 前改为 1024。
+切换 Embedding 模型后，旧论文的向量也需要用新模型重新索引，否则语义检索结果不可靠。
+
 ### 4. 启动
 
 ```bash
@@ -193,7 +202,7 @@ npm run dev
 
 ### 2. Server Component 默认策略
 
-默认使用 Server Component（首屏零 JS），仅在需要交互/状态时启用 Client Component（`"use client"`）。首页作为纯静态页面在服务端直接渲染为 HTML。
+页面按交互需求使用 Server Component 和 Client Component；上传和聊天界面在客户端维护状态。
 
 ### 3. 流式体验
 
@@ -203,12 +212,12 @@ npm run dev
 
 PDF 上传后立即返回 201，索引在后台异步执行。前端通过轮询展示实时处理状态。
 
-### 5. 安全设计
+### 5. 演示模式与安全边界
 
-- RLS（Row Level Security）确保用户数据隔离
-- Service Role Key 仅服务端使用，不暴露客户端
+- 当前 API 使用固定演示用户 ID 和服务端 Service Role Key，尚未接入登录和请求级用户隔离；不要公开部署为多人服务
+- 数据库包含 RLS 策略，但 Service Role Key 会绕过 RLS；公开部署前必须完成鉴权和论文归属检查
 - 文件类型和大小双重验证（前端 + 后端）
-- Storage Bucket 设为非公开，通过 RLS 策略控制访问
+- Storage Bucket 设为非公开
 
 ## 许可证
 
