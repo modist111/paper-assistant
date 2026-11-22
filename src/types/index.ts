@@ -38,6 +38,7 @@ export interface ChunkMetadata {
   section?: string;
   start_char?: number;
   end_char?: number;
+  embedding_model?: string;
 }
 
 /** RAG 检索结果 */

@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: ci-service-role-key
+      LLM_API_KEY: sk-your-ci-placeholder
+      EMBEDDING_API_KEY: sk-your-ci-placeholder
+      LLM_API_BASE_URL: https://api.siliconflow.cn/v1
+      EMBEDDING_API_BASE_URL: https://api.siliconflow.cn/v1
+      LLM_MODEL: Qwen/Qwen2.5-7B-Instruct
+      EMBEDDING_MODEL: BAAI/bge-m3
+      EMBEDDING_DIMENSIONS: "1024"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run type-check
+      - run: npm test
+      - run: npm run build

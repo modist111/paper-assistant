@@ -7,7 +7,7 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "20mb",
     },
   },
-  // Mark pdf-parse as external (it has native deps that don't bundle well on Windows)
+  // Keep pdf-parse's bundled PDF.js loaded by Node rather than Next.js bundling.
   serverExternalPackages: ["pdf-parse"],
 };
 

@@ -61,12 +61,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const DEMO_USER_ID = "00000000-0000-0000-0000-000000000000";
-
     const { data, error } = await supabaseAdmin
       .from("documents")
       .insert({
-        user_id: DEMO_USER_ID,
+        user_id: null,
         title,
         filename,
         storage_path,

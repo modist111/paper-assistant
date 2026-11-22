@@ -13,13 +13,13 @@
 ┌─────────────────────────────────────────────────────────┐
 │  📄 上传 PDF 论文                                       │
 │  ↓                                                      │
-│  🔍 自动文本提取 → 智能分块 → 向量索引 (1536d)           │
+│  🔍 自动文本提取 → 文本分块 → 向量索引 (1024d)           │
 │  ↓                                                      │
 │  💬 自然语言问答                                        │
 │  "这篇论文的核心贡献是什么？"                             │
 │  "论文使用了什么方法？有什么局限性？"                     │
 │  ↓                                                      │
-│  🤖 AI 回答 + 📎 来源引用（带置信度评分）                │
+│  🤖 AI 回答 + 📎 来源引用（带相似度评分）                │
 │  "根据论文片段1和片段3，该论文的主要贡献是..."            │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -27,9 +27,9 @@
 ### 核心特性
 
 - **📄 PDF 解析** — 自动提取文本，支持学术论文（文字型 PDF）
-- **🧠 语义分块** — RecursiveCharacterTextSplitter 智能分块，保留段落和句子完整性
-- **🔢 向量检索** — OpenAI text-embedding-3-small + pgvector，按余弦相似度搜索
-- **💬 流式问答** — gpt-4o RAG 生成，SSE 流式响应，逐字显示
+- **🧠 文本分块** — RecursiveCharacterTextSplitter 按段落和句子边界分块
+- **🔢 向量检索** — BAAI/bge-m3 + pgvector，按余弦相似度搜索
+- **💬 流式问答** — Qwen2.5-7B-Instruct 生成，SSE 流式响应
 - **📎 来源引用** — 回答附带检索片段和相似度评分
 - **🔄 多轮对话** — 支持对话历史上下文，可追问、深入探讨
 - **🎨 现代 UI** — Tailwind CSS + shadcn/ui，支持亮色/暗色主题
@@ -56,9 +56,9 @@
      ┌───────────────┼───────────────┐
      ▼               ▼               ▼
 ┌─────────┐  ┌──────────────┐  ┌──────────────┐
-│ Supabase│  │  Supabase    │  │  OpenAI API  │
-│PostgreSQL│  │  Storage     │  │   gpt-4o     │
-│+pgvector│  │  (PDFs)      │  │  Embedding   │
+│ Supabase│  │  Supabase    │  │ 硅基流动 API  │
+│PostgreSQL│  │  Storage     │  │    Qwen      │
+│+pgvector│  │  (PDFs)      │  │   bge-m3     │
 └─────────┘  └──────────────┘  └──────────────┘
 ```
 
@@ -71,8 +71,8 @@
 | 样式 | Tailwind CSS 3.4 + shadcn/ui | 设计系统 & UI 组件 |
 | 数据库 | Supabase (PostgreSQL + pgvector) | 结构化数据 + 向量存储 |
 | 文件存储 | Supabase Storage | PDF 文件安全存储 |
-| LLM | OpenAI gpt-4o（默认） | RAG 问答生成（可配置兼容 API） |
-| Embedding | OpenAI text-embedding-3-small（默认） | 文本向量化（数据库要求 1536 维） |
+| LLM | Qwen/Qwen2.5-7B-Instruct（硅基流动示例） | RAG 问答生成（可配置兼容 API） |
+| Embedding | BAAI/bge-m3（硅基流动示例） | 1024 维文本向量化 |
 | PDF 解析 | pdf-parse | 纯 JS PDF 文本提取 |
 | 分块 | @langchain/textsplitters | RecursiveCharacterTextSplitter |
 
@@ -82,14 +82,14 @@
 📥 索引阶段（上传时执行一次）：
   PDF → pdf-parse 提取文本
       → RecursiveCharacterTextSplitter (chunk_size=1000, overlap=200)
-      → text-embedding-3-small 向量化 (1536d)
+      → BAAI/bge-m3 向量化 (1024d)
       → pgvector 存储 (IVFFlat 索引)
 
 💬 问答阶段（每次提问执行）：
-  用户问题 → text-embedding-3-small 向量化
-           → pgvector cosine 相似度搜索 (topK=5, threshold=0.7)
+  用户问题 → BAAI/bge-m3 向量化
+           → pgvector cosine 相似度搜索 (topK=5, threshold=0.6)
            → 拼接上下文 + 构建 RAG System Prompt
-           → gpt-4o 流式生成 (temperature=0.3)
+           → Qwen2.5-7B-Instruct 流式生成 (temperature=0.3)
            → SSE 流式返回答案 + 来源引用
 ```
 
@@ -129,8 +129,11 @@ paper-assistant/
 │   └── types/
 │       └── index.ts                # 全栈共享类型定义
 ├── supabase/
-│   └── migrations/
-│       └── 001_init.sql            # 数据库建表 + pgvector + RLS
+│   ├── migrations/
+│   │   └── 001_init.sql            # 数据库建表 + pgvector + RLS
+│   └── SETUP.md                    # 全新数据库初始化与手动验收
+├── tests/                          # 合成 PDF 与解析回归测试
+├── .github/workflows/ci.yml        # lint、类型检查和生产构建
 ├── CLAUDE.md                       # AI 辅助开发文档
 └── 配置文件 (package.json, tsconfig, tailwind, etc.)
 ```
@@ -139,26 +142,26 @@ paper-assistant/
 
 ### 前置要求
 
-- Node.js >= 18
-- npm / pnpm
+- Node.js 22（CI 使用的版本）
+- npm
 - [Supabase](https://supabase.com) 账号（免费 tier 即可）
-- [OpenAI API Key](https://platform.openai.com/api-keys)
+- 硅基流动 API Key（用于示例中的聊天和 Embedding）
 
 ### 1. 克隆项目
 
 ```bash
-git clone https://github.com/你的用户名/paper-assistant.git
+git clone https://github.com/modist111/paper-assistant.git
 cd paper-assistant
-npm install
+npm ci
 ```
 
 ### 2. 配置 Supabase
 
-1. 在 [Supabase Dashboard](https://supabase.com/dashboard) 创建新项目
-2. 在 SQL Editor 中执行 `supabase/migrations/001_init.sql`
+1. 在 [Supabase Dashboard](https://supabase.com/dashboard) 创建全新项目
+2. 在 SQL Editor 中执行 `supabase/migrations/001_init.sql`（已包含 pgvector 扩展）
 3. 在 Storage 中创建名为 `papers` 的 Bucket（设为私有）
-4. 在 Storage → Policies 中添加 RLS 策略（见 SQL 文件的注释部分）
-5. 在 Project Settings → API 中复制 `URL`、`anon key`、`service_role key`
+4. 在 Project Settings → API 中复制 `URL`、`anon key`、`service_role key`
+5. 按 [Supabase 设置与验收指南](supabase/SETUP.md)核对数据库和演示模式限制
 
 ### 3. 配置环境变量
 
@@ -170,22 +173,22 @@ cp .env.local.example .env.local
 必需变量：
 
 ```env
-OPENAI_API_KEY=sk-你的密钥
+LLM_API_KEY=sk-你的硅基流动密钥
+LLM_API_BASE_URL=https://api.siliconflow.cn/v1
+LLM_MODEL=Qwen/Qwen2.5-7B-Instruct
+EMBEDDING_API_KEY=sk-你的硅基流动密钥
+EMBEDDING_API_BASE_URL=https://api.siliconflow.cn/v1
+EMBEDDING_MODEL=BAAI/bge-m3
+EMBEDDING_DIMENSIONS=1024
 NEXT_PUBLIC_SUPABASE_URL=https://你的项目.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=你的anon key
 SUPABASE_SERVICE_ROLE_KEY=你的service role key
 ```
 
-上传后的索引还需要有效的 Embedding 密钥，不要保留示例值 sk-your-openai-key。
-默认使用 text-embedding-3-small（1536 维）。若使用其他兼容服务，请同时配置
-EMBEDDING_API_KEY、EMBEDDING_API_BASE_URL、EMBEDDING_MODEL 和 EMBEDDING_DIMENSIONS。
-例如使用硅基流动时，LLM_API_BASE_URL 设置为 https://api.siliconflow.cn/v1，
-LLM_MODEL 可设置为 Qwen/Qwen2.5-7B-Instruct，并分别配置有效的 LLM_API_KEY 和 EMBEDDING_API_KEY。
-BAAI/bge-m3 返回 1024 维；将 EMBEDDING_API_BASE_URL 设置为 https://api.siliconflow.cn/v1，
-EMBEDDING_MODEL 设置为 BAAI/bge-m3，EMBEDDING_DIMENSIONS 设置为 1024，并确保数据库的
-document_chunks.embedding 列与 search_document_chunks 参数都是 VECTOR(1024)。
-仓库初始化 SQL 默认 1536 维。新建数据库若使用 bge-m3，请在执行初始化 SQL 前改为 1024。
-切换 Embedding 模型后，旧论文的向量也需要用新模型重新索引，否则语义检索结果不可靠。
+仅在本地的 .env.local 填写真正的密钥，绝不提交此文件。初始化 SQL 与示例配置
+均使用 1024 维；若改用 text-embedding-3-small，须在全新数据库初始化前同时把
+SQL 中的向量列和搜索函数参数改为 VECTOR(1536)，并设置 EMBEDDING_DIMENSIONS=1536。
+已有向量不能仅靠修改维度或模型名复用，需要先备份并重新索引。
 
 ### 4. 启动
 
@@ -193,6 +196,20 @@ document_chunks.embedding 列与 search_document_chunks 参数都是 VECTOR(1024
 npm run dev
 # 访问 http://localhost:3000
 ```
+
+### 5. 验证
+
+```bash
+npm run lint
+npm run type-check
+npm test
+npm run build
+```
+
+GitHub Actions 在每次推送和 PR 上运行相同检查，使用无权限的占位配置，
+不访问你的 Supabase 项目或模型服务。端到端验收需要自行配置真实密钥；
+按 [Supabase 设置与验收指南](supabase/SETUP.md)上传文字型 PDF、等待 `ready`，
+再提问并检查回答与引用。不能提取文本的 PDF 应进入 `error` 状态。
 
 ## 设计亮点
 
@@ -211,6 +228,7 @@ npm run dev
 ### 4. 异步索引
 
 PDF 上传后立即返回 201，索引在后台异步执行。前端通过轮询展示实时处理状态。
+目前索引依赖同一服务进程的 `after()`；进程重启可能中断任务，持久队列尚未实现。
 
 ### 5. 演示模式与安全边界
 

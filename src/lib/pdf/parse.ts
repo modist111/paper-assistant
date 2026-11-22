@@ -28,7 +28,12 @@ export interface ParsedPdf {
  * @returns 解析后的文本和元信息
  */
 export async function parsePdfBuffer(buffer: Buffer): Promise<ParsedPdf> {
-  const data = await pdfParse(buffer);
+  // pdf-parse 的类型声明仅写 Buffer，底层 PDF.js 也接受 Uint8Array。
+  // 请求中的 Buffer 可能共享更大的 ArrayBuffer；复制为纯 Uint8Array 避免偏移问题。
+  const parseBytes = pdfParse as unknown as (
+    dataBuffer: Uint8Array
+  ) => ReturnType<typeof pdfParse>;
+  const data = await parseBytes(Uint8Array.from(buffer));
 
   return {
     text: data.text,

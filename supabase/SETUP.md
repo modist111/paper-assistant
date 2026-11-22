@@ -1,95 +1,55 @@
-# Supabase 设置指南
+# Supabase 设置与验收
 
-## 步骤 1：创建 Supabase 项目
+本指南用于**全新 Supabase 项目**。示例模型为硅基流动 `BAAI/bge-m3`，输出 1024 维。
+已有数据库包含论文向量时，不要重新执行初始化 SQL 或直接改向量维度；先备份并重新索引。
 
-1. 访问 [supabase.com](https://supabase.com) 并登录
-2. 点击 **New project**
-3. 填写：
-   - **Name**: `paper-assistant`
-   - **Database Password**: 设置一个强密码（保存好！）
-   - **Region**: 选择离你最近的区域（亚洲选 Tokyo 或 Singapore）
-   - **Pricing Plan**: Free（免费层包含 500MB 数据库 + 2 个项目）
-4. 点击 **Create new project**，等待初始化完成（约 2 分钟）
+## 1. 创建项目与获取密钥
 
-## 步骤 2：获取 API 密钥
+在 Supabase 创建项目，从 Project Settings → API 获取项目 URL、anon key 和 service_role key。
+`service_role` 仅用于服务端，不能放进前端代码或提交到 Git。
 
-1. 进入 **Project Settings → API**
-2. 复制以下值：
-   - **Project URL** → 填入 `.env.local` 的 `NEXT_PUBLIC_SUPABASE_URL`
-   - **anon public key** → 填入 `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - **service_role key** → 填入 `SUPABASE_SERVICE_ROLE_KEY`（⚠️ 机密！）
+## 2. 初始化数据库
 
-## 步骤 3：启用 pgvector 扩展
+在 SQL Editor 中一次性执行 `supabase/migrations/001_init.sql` 的全部内容。
+它会启用 pgvector、创建表、索引、搜索函数及 RLS 策略。
+向量列和搜索函数均使用 `VECTOR(1024)`，与示例模型一致。
 
-在 Supabase Dashboard 左侧导航中：
+如果要使用 OpenAI `text-embedding-3-small`，必须在**空库初始化前**把 SQL 中两处
+`VECTOR(1024)` 改为 `VECTOR(1536)`，并在本地配置 `EMBEDDING_DIMENSIONS=1536`。
 
-1. 进入 **SQL Editor**
-2. 点击 **New query**
-3. 粘贴并执行：
-   ```sql
-   CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions;
-   ```
-4. 点击 **Run** 按钮执行
+## 3. 创建私有存储桶
 
-## 步骤 4：执行数据库迁移
+在 Storage 创建名为 `papers` 的 bucket，保持私有。初始化 SQL 底部的 Storage
+策略示例供未来接入 Supabase Auth 时参考；当前演示 API 用 Service Role。
 
-1. 在 SQL Editor 中点击 **New query**
-2. 将 `supabase/migrations/001_init.sql` 的**全部内容**粘贴进去
-3. 点击 **Run** 执行
+## 4. 配置并启动
 
-或者使用 Supabase CLI：
 ```bash
-npx supabase login
-npx supabase link --project-ref <your-project-ref>
-npx supabase db push
+cp .env.local.example .env.local
+# 编辑 .env.local，填入真实的 Supabase 与硅基流动密钥
+npm ci
+npm run dev
 ```
 
-## 步骤 5：创建 Storage Bucket
+仅在 `.env.local` 填写真正密钥；该文件已被 Git 忽略。URL 直接写 `https://`，不要加反斜杠。
+当前示例模型是 `Qwen/Qwen2.5-7B-Instruct` 与 `BAAI/bge-m3`。
 
-1. 进入 **Storage** 页面
-2. 点击 **New bucket**
-3. 名称填 `papers`
-4. **取消勾选** "Public bucket"（设为私有）
-5. 点击 **Create bucket**
+## 5. 验收
 
-## 步骤 6：配置 Storage RLS 策略
+先运行 `npm run lint`、`npm run type-check` 和 `npm run build`。然后用文字型 PDF 验证：
 
-在 SQL Editor 中执行以下 SQL（已在 001_init.sql 底部注释中）：
+1. 上传后出现论文记录，状态从 `processing` 变为 `ready`。
+2. 提问后收到包含引用的回答，输入框恢复可用。
+3. 对无法提取文本的 PDF，应出现 `error` 状态及可读的错误信息。
+
+可在 SQL Editor 核对数据库向量列：
 
 ```sql
--- 允许认证用户上传 PDF
-CREATE POLICY "Allow authenticated uploads"
-  ON storage.objects FOR INSERT TO authenticated
-  WITH CHECK (
-    bucket_id = 'papers'
-    AND (storage.extension(name) = 'pdf')
-    AND auth.uid()::text = (storage.foldername(name))[1]
-  );
-
--- 允许用户查看自己上传的文件
-CREATE POLICY "Allow users to view own files"
-  ON storage.objects FOR SELECT TO authenticated
-  USING (
-    bucket_id = 'papers'
-    AND auth.uid()::text = (storage.foldername(name))[1]
-  );
-
--- 允许用户删除自己的文件
-CREATE POLICY "Allow users to delete own files"
-  ON storage.objects FOR DELETE TO authenticated
-  USING (
-    bucket_id = 'papers'
-    AND auth.uid()::text = (storage.foldername(name))[1]
-  );
+SELECT format_type(atttypid, atttypmod) AS embedding_type
+FROM pg_attribute
+WHERE attrelid = 'public.document_chunks'::regclass AND attname = 'embedding';
 ```
 
-## 验证
+预期为 `vector(1024)`。新建演示文档的 `user_id` 为 NULL，不需要虚构 `auth.users` 记录。
 
-执行以下 SQL 确认表已创建：
-```sql
-SELECT table_name FROM information_schema.tables
-WHERE table_schema = 'public'
-ORDER BY table_name;
-```
-
-预期输出：`chat_messages`, `chat_sessions`, `document_chunks`, `documents`
+当前版本没有登录和请求级权限检查，不能作为多人公开服务部署。

@@ -1,5 +1,5 @@
 import { parsePdfBuffer } from "./parse";
-import { chunkText, type TextChunk } from "./chunk";
+import { chunkText } from "./chunk";
 import { embedTexts, EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } from "@/lib/ai/embed";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { PaperStatus } from "@/types";
@@ -35,7 +35,7 @@ export interface IndexPipelineResult {
  * 此函数编排以下步骤：
  * 1. 解析 PDF → 提取文本
  * 2. 文本分块
- * 3. 批量向量化（每批 20 个，避免 API 限流）
+ * 3. 批量向量化（每批 10 个，避免 API 限流）
  * 4. 存入 document_chunks 表
  * 5. 更新 documents.status = 'ready'
  *
@@ -150,8 +150,9 @@ export async function runIndexPipeline(
     console.error(`[IndexPipeline] 索引失败: ${message}`);
     // 打印完整错误详情
     if (error instanceof Error && "status" in error) {
-      console.error(`[IndexPipeline] HTTP 状态: ${(error as any).status}`);
-      console.error(`[IndexPipeline] 响应体:`, (error as any).body || "(空)");
+      const apiError = error as Error & { status?: number; body?: unknown };
+      console.error("[IndexPipeline] HTTP 状态:", apiError.status);
+      console.error("[IndexPipeline] 响应体:", apiError.body ?? "(空)");
     }
     if (error instanceof Error && error.stack) {
       console.error(`[IndexPipeline] 堆栈: ${error.stack}`);

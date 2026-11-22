@@ -1,8 +1,8 @@
 -- ============================================================
 -- AI 论文阅读助手 — 数据库初始化迁移
 -- ============================================================
--- 在 Supabase SQL Editor 中执行此文件
--- 或使用 Supabase CLI: supabase migration up
+-- 仅用于初始化全新数据库；示例配置使用 BAAI/bge-m3（1024 维）。
+-- 已有 1536 维向量的数据库不能直接套用此文件，需备份并重新索引。
 -- ============================================================
 
 -- 1. 启用 pgvector 扩展
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS document_chunks (
   chunk_index   INTEGER NOT NULL,
   content       TEXT NOT NULL,
   content_hash  TEXT NOT NULL,
-  embedding     VECTOR(1536),  -- text-embedding-3-small 维度
+  embedding     VECTOR(1024),  -- BAAI/bge-m3 维度
   metadata      JSONB NOT NULL DEFAULT '{}',
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -113,10 +113,10 @@ CREATE TRIGGER trg_documents_updated_at
 
 -- 按余弦相似度搜索最相似的 chunks
 CREATE OR REPLACE FUNCTION search_document_chunks(
-  query_embedding VECTOR(1536),
+  query_embedding VECTOR(1024),
   match_document_id UUID DEFAULT NULL,
   match_count INTEGER DEFAULT 5,
-  similarity_threshold FLOAT DEFAULT 0.7
+  similarity_threshold FLOAT DEFAULT 0.6
 )
 RETURNS TABLE (
   id UUID,

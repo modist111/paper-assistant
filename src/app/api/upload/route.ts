@@ -11,8 +11,8 @@ const MAX_FILE_SIZE = 20 * 1024 * 1024;
 
 export const maxDuration = 300;
 
-/** 演示用户 ID（开发阶段使用，无认证模式） */
-const DEMO_USER_ID = "00000000-0000-0000-0000-000000000000";
+/** 未接入认证时的 Storage 前缀；不会写入 auth.users 外键 */
+const DEMO_STORAGE_PREFIX = "demo";
 
 /**
  * POST /api/upload
@@ -73,10 +73,12 @@ export async function POST(request: NextRequest) {
     // 构建存储路径
     const timestamp = Date.now();
     const safeFilename = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const storagePath = `${DEMO_USER_ID}/${timestamp}_${safeFilename}`;
+    const storagePath = `${DEMO_STORAGE_PREFIX}/${timestamp}_${safeFilename}`;
 
     // 上传到 Supabase Storage
     const fileBuffer = Buffer.from(await file.arrayBuffer());
+    // Storage 请求与异步索引分别持有独立字节，避免旧版 PDF.js 读取复用内存。
+    const indexBuffer = Buffer.from(fileBuffer);
 
     const { error: uploadError } = await supabaseAdmin.storage
       .from("papers")
@@ -99,7 +101,7 @@ export async function POST(request: NextRequest) {
     const { data: paper, error: insertError } = await supabaseAdmin
       .from("documents")
       .insert({
-        user_id: DEMO_USER_ID,
+        user_id: null,
         title: paperTitle,
         filename: file.name,
         storage_path: storagePath,
@@ -126,7 +128,7 @@ export async function POST(request: NextRequest) {
       try {
         const result = await runIndexPipeline({
           documentId: paper.id,
-          pdfBuffer: fileBuffer,
+          pdfBuffer: indexBuffer,
         });
         if (!result.success) {
           console.error("[POST /api/upload] 索引失败 (paperId=" + paper.id + "): " + result.error);

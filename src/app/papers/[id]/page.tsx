@@ -21,6 +21,7 @@ function PaperDetailContent({
   const [paper, setPaper] = useState<Paper | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isProcessing = paper?.status === "processing";
 
   // 加载论文详情
   useEffect(() => {
@@ -42,7 +43,7 @@ function PaperDetailContent({
 
   // 轮询处理中的论文
   useEffect(() => {
-    if (!paper || paper.status !== "processing") return;
+    if (!isProcessing) return;
 
     const interval = setInterval(async () => {
       try {
@@ -59,7 +60,7 @@ function PaperDetailContent({
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [paper?.status, id]);
+  }, [isProcessing, id]);
 
   // 删除论文
   async function handleDelete() {

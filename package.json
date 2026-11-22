@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint src next.config.ts eslint.config.mjs",
+    "test": "node --test tests/pdf-parse.test.cjs",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {

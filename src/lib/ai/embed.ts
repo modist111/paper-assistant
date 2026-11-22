@@ -2,14 +2,13 @@ import OpenAI from "openai";
 
 /**
  * Embedding 专用客户端
- * 默认使用 OpenAI text-embedding-3-small
- * 也可通过环境变量切换到其他兼容服务（如阿里云、硅基流动等）
+ * 示例默认使用硅基流动 BAAI/bge-m3；可显式配置其他兼容服务。
  */
-const embeddingApiKey = process.env.EMBEDDING_API_KEY || process.env.OPENAI_API_KEY;
+const embeddingApiKey = process.env.EMBEDDING_API_KEY;
 
 export function assertEmbeddingConfigured(): void {
   if (!embeddingApiKey || /^sk-your-/i.test(embeddingApiKey)) {
-    throw new Error("请在 .env.local 中配置有效的 EMBEDDING_API_KEY 或 OPENAI_API_KEY");
+    throw new Error("请在 .env.local 中配置有效的 EMBEDDING_API_KEY");
   }
   if (!Number.isInteger(EMBEDDING_DIMENSIONS) || EMBEDDING_DIMENSIONS <= 0) {
     throw new Error("EMBEDDING_DIMENSIONS 必须是正整数");
@@ -18,16 +17,13 @@ export function assertEmbeddingConfigured(): void {
 
 const embeddingClient = new OpenAI({
   apiKey: embeddingApiKey || "not-configured",
-  baseURL:
-    process.env.EMBEDDING_API_BASE_URL ||
-    process.env.OPENAI_API_BASE_URL ||
-    "https://api.openai.com/v1",
+  baseURL: process.env.EMBEDDING_API_BASE_URL || "https://api.siliconflow.cn/v1",
   timeout: 20_000,
   maxRetries: 1,
 });
 
 export const EMBEDDING_MODEL =
-  process.env.EMBEDDING_MODEL || "text-embedding-3-small";
+  process.env.EMBEDDING_MODEL || "BAAI/bge-m3";
 
 // The pgvector column and search RPC must use the same dimension.
 export const EMBEDDING_DIMENSIONS = Number(

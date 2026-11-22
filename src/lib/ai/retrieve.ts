@@ -1,6 +1,6 @@
 import { embedText, EMBEDDING_MODEL } from "./embed";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import type { RetrievalResult } from "@/types";
+import type { ChunkMetadata, RetrievalResult } from "@/types";
 
 /**
  * 检索选项
@@ -73,7 +73,7 @@ export async function retrieveRelevantChunks(
       chunk_index: row.chunk_index,
       content: row.content,
       content_hash: "",
-      metadata: row.metadata as any,
+      metadata: (row.metadata ?? {}) as ChunkMetadata,
       created_at: "",
     },
     similarity: row.similarity,

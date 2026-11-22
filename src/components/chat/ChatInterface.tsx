@@ -15,7 +15,7 @@ interface ChatInterfaceProps {
  * 整合消息列表、输入框、来源引用
  */
 export function ChatInterface({ paperId }: ChatInterfaceProps) {
-  const { messages, isLoading, sources, error, sendMessage, clearMessages } =
+  const { messages, isLoading, error, sendMessage, clearMessages } =
     useChat({ paperId });
 
   const scrollRef = useRef<HTMLDivElement>(null);

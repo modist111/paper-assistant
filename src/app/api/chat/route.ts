@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { llmClient, LLM_MODEL } from "@/lib/ai/llm-client";
+import { assertLlmConfigured, llmClient, LLM_MODEL } from "@/lib/ai/llm-client";
 import { retrieveRelevantChunks } from "@/lib/ai/retrieve";
 import { RAG_SYSTEM_PROMPT } from "@/lib/ai/generate";
 import type { SourceReference } from "@/types";
@@ -33,6 +33,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    assertLlmConfigured();
+
     // 步骤 1: 检索相关片段
     const retrievalResults = await retrieveRelevantChunks(question, {
       documentId: paperId,
@@ -44,7 +46,7 @@ export async function POST(request: NextRequest) {
       chunk_index: r.chunk.chunk_index,
       content: r.chunk.content.slice(0, 200),
       similarity: r.similarity,
-      page: (r.chunk.metadata as any)?.page,
+      page: r.chunk.metadata.page,
     }));
 
     if (retrievalResults.length === 0) {

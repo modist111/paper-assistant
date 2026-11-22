@@ -1,4 +1,4 @@
-import { llmClient, LLM_MODEL } from "./llm-client";
+import { assertLlmConfigured, llmClient, LLM_MODEL } from "./llm-client";
 import { retrieveRelevantChunks, DEFAULT_SIMILARITY_THRESHOLD } from "./retrieve";
 import type { SourceReference } from "@/types";
 
@@ -70,6 +70,7 @@ ${context}
 export async function generateRagAnswer(
   options: GenerateOptions
 ): Promise<GenerateResult> {
+  assertLlmConfigured();
   const {
     paperId,
     question,
@@ -121,7 +122,7 @@ export async function generateRagAnswer(
   const sources: SourceReference[] = retrievalResults.map((r) => ({
     chunk_index: r.chunk.chunk_index,
     content: r.chunk.content.slice(0, 200), // 截取前 200 字符作为预览
-    page: (r.chunk.metadata as any)?.page,
+    page: r.chunk.metadata.page,
     similarity: r.similarity,
   }));
 
