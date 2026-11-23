@@ -132,7 +132,7 @@ paper-assistant/
 │   ├── migrations/
 │   │   └── 001_init.sql            # 数据库建表 + pgvector + RLS
 │   └── SETUP.md                    # 全新数据库初始化与手动验收
-├── tests/                          # 合成 PDF 与解析回归测试
+├── tests/                          # API 权限、PostgreSQL 事务和 PDF 回归测试
 ├── .github/workflows/ci.yml        # lint、类型检查和生产构建
 ├── CLAUDE.md                       # AI 辅助开发文档
 └── 配置文件 (package.json, tsconfig, tailwind, etc.)
@@ -158,7 +158,7 @@ npm ci
 ### 2. 配置 Supabase
 
 1. 在 [Supabase Dashboard](https://supabase.com/dashboard) 创建全新项目
-2. 在 SQL Editor 中执行 `supabase/migrations/001_init.sql`（已包含 pgvector 扩展）
+2. 在 SQL Editor 中依次执行 `supabase/migrations/001_init.sql` 和 `002_auth_and_index_jobs.sql`
 3. 在 Storage 中创建名为 `papers` 的 Bucket（设为私有）
 4. 在 Project Settings → API 中复制 `URL`、`anon key`、`service_role key`
 5. 按 [Supabase 设置与验收指南](supabase/SETUP.md)核对数据库和演示模式限制
@@ -197,6 +197,11 @@ npm run dev
 # 访问 http://localhost:3000
 ```
 
+另开终端执行 `npm run worker`。worker 定期领取数据库任务，负责自动重试和进程中断后的恢复；
+`after()` 只负责尽快触发首轮处理，不是持久队列的替代品。
+首次使用访问 `/login` 注册或登录 Supabase Auth 账号；若项目启用邮箱确认，先完成邮件验证再登录。
+已有无归属演示论文会保留在数据库中，但不会自动分配给新账号；详见 [部署指南](supabase/SETUP.md)。
+
 ### 5. 验证
 
 ```bash
@@ -227,15 +232,21 @@ GitHub Actions 在每次推送和 PR 上运行相同检查，使用无权限的�
 
 ### 4. 异步索引
 
-PDF 上传后立即返回 201，索引在后台异步执行。前端通过轮询展示实时处理状态。
-目前索引依赖同一服务进程的 `after()`；进程重启可能中断任务，持久队列尚未实现。
+PDF 和索引任务元数据在同一数据库事务中创建，上传返回 201 后由 worker 处理。
+任务采用两分钟租约、30 秒心跳和令牌校验；超时任务可以重新领取，单轮最多尝试三次。
+成功时在一个事务中替换全部文本块并标记 ready，失败时不会发布半成品。
+前端展示当前步骤和进度，并支持处理失败或中断后的“重新处理”。
 
-### 5. 演示模式与安全边界
+### 5. 身份与数据隔离
 
-- 当前 API 使用固定演示用户 ID 和服务端 Service Role Key，尚未接入登录和请求级用户隔离；不要公开部署为多人服务
-- 数据库包含 RLS 策略，但 Service Role Key 会绕过 RLS；公开部署前必须完成鉴权和论文归属检查
+- Supabase Auth 通过服务端 getUser() 验证身份，每个论文 API 固定过滤 user_id
+- 向量检索使用用户会话和 RLS；后台任务写入函数仅允许 service_role 执行
+- 关闭浏览器对论文和向量的直接写入权限，防止篡改归属、状态和 Storage 路径
 - 文件类型和大小双重验证（前端 + 后端）
 - Storage Bucket 设为非公开
+
+实现细节、已验证场景和面试问答见 [安全与索引可靠性](docs/security-and-indexing.md)。
+这版提供应用身份隔离和任务恢复；公网部署还需按实际流量设置网关限流、配额与监控。
 
 ## 许可证
 

@@ -16,6 +16,7 @@ export interface Paper {
   file_size: number | null;
   status: PaperStatus;
   error_message?: string | null;
+  retry_available?: boolean;
   created_at: string;
   updated_at: string;
 }

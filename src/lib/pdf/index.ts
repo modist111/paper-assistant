@@ -1,202 +1,66 @@
 import { parsePdfBuffer } from "./parse";
 import { chunkText } from "./chunk";
-import { embedTexts, EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } from "@/lib/ai/embed";
+import { embedTexts, EMBEDDING_MODEL } from "@/lib/ai/embed";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import type { PaperStatus } from "@/types";
 
-/**
- * 完整索引流水线选项
- */
 export interface IndexPipelineOptions {
-  /** 文档记录 ID（必须已存在） */
   documentId: string;
-  /** PDF 文件的原始 Buffer */
+  leaseToken: string;
   pdfBuffer: Buffer;
-  /** 分块大小 */
+  fallbackTitle?: string;
+  signal?: AbortSignal;
   chunkSize?: number;
-  /** 分块重叠大小 */
   chunkOverlap?: number;
 }
 
-/**
- * 索引流水线结果
- */
-export interface IndexPipelineResult {
-  success: boolean;
-  chunkCount: number;
-  title: string;
-  pageCount: number;
-  error?: string;
-}
-
-/**
- * 完整的 PDF 索引流水线
- *
- * 此函数编排以下步骤：
- * 1. 解析 PDF → 提取文本
- * 2. 文本分块
- * 3. 批量向量化（每批 10 个，避免 API 限流）
- * 4. 存入 document_chunks 表
- * 5. 更新 documents.status = 'ready'
- *
- * @param options - 流水线配置
- * @returns 索引结果
- */
-export async function runIndexPipeline(
-  options: IndexPipelineOptions
-): Promise<IndexPipelineResult> {
-  const { documentId, pdfBuffer, chunkSize, chunkOverlap } = options;
-
-  try {
-    // 步骤 1: 解析 PDF
-    console.log("[IndexPipeline] 步骤1: 开始解析 PDF...");
-    const parsed = await parsePdfBuffer(pdfBuffer);
-    const title = parsed.info.title || "未知标题";
-    console.log(`[IndexPipeline] 步骤1: PDF 解析完成 — ${parsed.pageCount} 页, ${parsed.text.length} 字符`);
-
-    // 步骤 2: 文本分块
-    console.log("[IndexPipeline] 步骤2: 开始文本分块...");
-    const chunks = await chunkText(parsed.text, {
-      chunkSize: chunkSize ?? 1000,
-      chunkOverlap: chunkOverlap ?? 200,
+/** Build in memory, then publish chunks and ready status in a single fenced transaction. */
+export async function runIndexPipeline(options: IndexPipelineOptions) {
+  const { documentId, leaseToken, pdfBuffer, signal } = options;
+  async function progress(step: string, completed = 0, total = 0) {
+    signal?.throwIfAborted();
+    const { data, error } = await supabaseAdmin.rpc("heartbeat_document_index_job", {
+      p_document_id: documentId, p_lease_token: leaseToken,
+      p_step: step, p_completed: completed, p_total: total,
     });
-    console.log(`[IndexPipeline] 步骤2: 分块完成 — ${chunks.length} 个块`);
-
-    if (chunks.length === 0) {
-      await updateStatus(documentId, "error", "未能从 PDF 中提取文本");
-      return {
-        success: false,
-        chunkCount: 0,
-        title,
-        pageCount: parsed.pageCount,
-        error: "未能从 PDF 中提取文本",
-      };
-    }
-
-    // 步骤 3 & 4: 分批向量化并存入数据库
-    const BATCH_SIZE = 10; // 每批 10 个 chunk（硅基流动限速较严）
-    let insertedCount = 0;
-
-    for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
-      const batch = chunks.slice(i, i + BATCH_SIZE);
-      const texts = batch.map((c) => c.content);
-
-      // 3. 向量化
-      const batchNum = Math.floor(i / BATCH_SIZE) + 1;
-      console.log(`[IndexPipeline] 步骤3: 向量化批次 ${batchNum} (${texts.length} 个文本)...`);
-      const embeddings = await embedTexts(texts);
-      const invalidEmbedding = embeddings.find((embedding) => embedding.length !== EMBEDDING_DIMENSIONS);
-      if (invalidEmbedding) {
-        throw new Error("Embedding 输出维度为 " + invalidEmbedding.length + "，数据库要求 " + EMBEDDING_DIMENSIONS);
-      }
-      console.log(`[IndexPipeline] 步骤3: 向量化完成 — ${embeddings.length} 个向量`);
-
-      // 批次间延迟 500ms，避免 API 限速
-      if (i + BATCH_SIZE < chunks.length) {
-        await new Promise((r) => setTimeout(r, 500));
-      }
-
-      // 4. 写入数据库
-      const rows = batch.map((chunk, idx) => ({
-        document_id: documentId,
-        chunk_index: chunk.index,
-        content: sanitizeContent(chunk.content),
-        content_hash: chunk.contentHash,
-        embedding: embeddings[idx],
-        metadata: {
-          start_char: chunk.metadata.startChar,
-          end_char: chunk.metadata.endChar,
-          embedding_model: EMBEDDING_MODEL,
-        },
-      }));
-
-      const { error: insertError } = await supabaseAdmin
-        .from("document_chunks")
-        .insert(rows);
-
-      if (insertError) {
-        throw new Error(`数据库写入失败: ${insertError.message}`);
-      }
-
-      insertedCount += batch.length;
-    }
-
-    // 步骤 5: 更新文档状态
-    const { data: readyDocument, error: readyError } = await supabaseAdmin
-      .from("documents")
-      .update({
-        status: "ready" as PaperStatus,
-        title,
-        page_count: parsed.pageCount,
-        error_message: null,
-      })
-      .eq("id", documentId)
-      .select("id")
-      .single();
-
-    if (readyError || !readyDocument) {
-      throw new Error("更新论文完成状态失败: " + (readyError?.message || "未找到文档"));
-    }
-
-    return {
-      success: true,
-      chunkCount: insertedCount,
-      title,
-      pageCount: parsed.pageCount,
-    };
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "未知错误";
-    console.error(`[IndexPipeline] 索引失败: ${message}`);
-    // 打印完整错误详情
-    if (error instanceof Error && "status" in error) {
-      const apiError = error as Error & { status?: number; body?: unknown };
-      console.error("[IndexPipeline] HTTP 状态:", apiError.status);
-      console.error("[IndexPipeline] 响应体:", apiError.body ?? "(空)");
-    }
-    if (error instanceof Error && error.stack) {
-      console.error(`[IndexPipeline] 堆栈: ${error.stack}`);
-    }
-    await updateStatus(documentId, "error", message);
-    return {
-      success: false,
-      chunkCount: 0,
-      title: "",
-      pageCount: 0,
-      error: message,
-    };
+    if (error) throw new Error("写入索引进度失败: " + error.message);
+    if (!data) throw new Error("索引任务锁已过期，旧任务停止发布");
   }
-}
 
-/**
- * 更新文档状态
- */
-async function updateStatus(
-  documentId: string,
-  status: PaperStatus,
-  errorMessage?: string
-) {
-  const { data, error } = await supabaseAdmin
-    .from("documents")
-    .update({
-      status,
-      error_message: errorMessage || null,
-    })
-    .eq("id", documentId)
-    .select("id")
-    .single();
-
-  if (error || !data) {
-    throw new Error("更新论文状态失败: " + (error?.message || "未找到文档"));
+  await progress("parsing");
+  const parsed = await parsePdfBuffer(pdfBuffer);
+  const title = parsed.info.title || options.fallbackTitle || "未知标题";
+  await progress("chunking");
+  const chunks = await chunkText(parsed.text, {
+    chunkSize: options.chunkSize ?? 1000,
+    chunkOverlap: options.chunkOverlap ?? 200,
+  });
+  if (!chunks.length) throw new Error("未能从 PDF 中提取文本");
+  const rows = [];
+  const batchSize = 10;
+  for (let offset = 0; offset < chunks.length; offset += batchSize) {
+    await progress("embedding", offset, chunks.length);
+    const batch = chunks.slice(offset, offset + batchSize);
+    const embeddings = await embedTexts(batch.map((chunk) => chunk.content));
+    signal?.throwIfAborted();
+    rows.push(...batch.map((chunk, index) => ({
+      chunk_index: chunk.index,
+      content: chunk.content.replace(/\x00/g, ""),
+      content_hash: chunk.contentHash,
+      embedding: embeddings[index],
+      metadata: {
+        start_char: chunk.metadata.startChar, end_char: chunk.metadata.endChar,
+        embedding_model: EMBEDDING_MODEL,
+      },
+    })));
   }
+  await progress("publishing", chunks.length, chunks.length);
+  const { data, error } = await supabaseAdmin.rpc("finish_document_index_job", {
+    p_document_id: documentId, p_lease_token: leaseToken,
+    p_chunks: rows, p_title: title, p_page_count: parsed.pageCount,
+  });
+  if (error) throw new Error("发布索引失败: " + error.message);
+  if (!data) throw new Error("索引任务已失效，未覆盖新任务结果");
+  return { success: true, chunkCount: rows.length, title, pageCount: parsed.pageCount };
 }
 
 export { parsePdfBuffer, chunkText };
-
-/** 清理文本中的非法 Unicode 转义序列 */
-function sanitizeContent(text: string): string {
-  return text
-    .replace(/\\u[0-9a-fA-F]{4}/g, " ")  // 移除 \uXXXX 序列
-    .replace(/\\/g, "\\\\")               // 转义反斜杠
-    .replace(/\x00/g, "");                // 移除 null 字符
-}

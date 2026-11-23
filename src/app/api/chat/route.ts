@@ -3,6 +3,14 @@ import { assertLlmConfigured, llmClient, LLM_MODEL } from "@/lib/ai/llm-client";
 import { retrieveRelevantChunks } from "@/lib/ai/retrieve";
 import { RAG_SYSTEM_PROMPT } from "@/lib/ai/generate";
 import type { SourceReference } from "@/types";
+import { getAuthenticatedUser } from "@/lib/auth/user";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { z } from "zod";
+
+const chatSchema = z.object({
+  paperId: z.string().uuid(), question: z.string().trim().min(1).max(4000),
+  history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(8000) })).max(10).default([]),
+});
 
 /**
  * POST /api/chat
@@ -23,8 +31,16 @@ import type { SourceReference } from "@/types";
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { paperId, question, history = [] } = body;
+    const user = await getAuthenticatedUser();
+    if (!user) return Response.json({ error: "请先登录" }, { status: 401 });
+    const body = chatSchema.safeParse(await request.json());
+    if (!body.success) return Response.json({ error: "提问格式不正确" }, { status: 400 });
+    const { paperId, question, history } = body.data;
+    const { data: paper, error: paperError } = await supabaseAdmin.from("documents")
+      .select("id,status").eq("id", paperId).eq("user_id", user.id).maybeSingle();
+    if (paperError) return Response.json({ error: "读取论文失败" }, { status: 500 });
+    if (!paper) return Response.json({ error: "论文不存在" }, { status: 404 });
+    if (paper.status !== "ready") return Response.json({ error: "论文还未完成索引" }, { status: 409 });
 
     if (!paperId || !question) {
       return new Response(
@@ -142,6 +158,7 @@ ${context}
       },
     });
   } catch (error) {
+    if (error instanceof SyntaxError) return Response.json({ error: "无效的 JSON 请求" }, { status: 400 });
     const message = error instanceof Error ? error.message : "未知错误";
     console.error(`[POST /api/chat] 异常: ${message}`);
     return new Response(JSON.stringify({ error: message }), {

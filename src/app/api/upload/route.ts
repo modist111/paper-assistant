@@ -1,7 +1,8 @@
 import { after, NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { runIndexPipeline } from "@/lib/pdf";
+import { runNextIndexJob } from "@/lib/indexing/jobs";
 import { assertEmbeddingConfigured } from "@/lib/ai/embed";
+import { getAuthenticatedUser } from "@/lib/auth/user";
 
 /** 允许的文件类型 */
 const ALLOWED_MIME_TYPES = ["application/pdf"];
@@ -10,9 +11,6 @@ const ALLOWED_MIME_TYPES = ["application/pdf"];
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 
 export const maxDuration = 300;
-
-/** 未接入认证时的 Storage 前缀；不会写入 auth.users 外键 */
-const DEMO_STORAGE_PREFIX = "demo";
 
 /**
  * POST /api/upload
@@ -29,6 +27,12 @@ const DEMO_STORAGE_PREFIX = "demo";
  */
 export async function POST(request: NextRequest) {
   try {
+    const user = await getAuthenticatedUser();
+    if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
+    if (Number(request.headers.get("content-length")) > MAX_FILE_SIZE + 1024 * 1024) {
+      return NextResponse.json({ error: "上传请求超过大小限制" }, { status: 413 });
+    }
+
     // 解析 multipart form data
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
@@ -73,12 +77,13 @@ export async function POST(request: NextRequest) {
     // 构建存储路径
     const timestamp = Date.now();
     const safeFilename = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const storagePath = `${DEMO_STORAGE_PREFIX}/${timestamp}_${safeFilename}`;
+    const storagePath = `${user.id}/${timestamp}_${safeFilename}`;
 
     // 上传到 Supabase Storage
     const fileBuffer = Buffer.from(await file.arrayBuffer());
-    // Storage 请求与异步索引分别持有独立字节，避免旧版 PDF.js 读取复用内存。
-    const indexBuffer = Buffer.from(fileBuffer);
+    if (!fileBuffer.subarray(0, 5).equals(Buffer.from("%PDF-"))) {
+      return NextResponse.json({ error: "文件内容不是 PDF" }, { status: 400 });
+    }
 
     const { error: uploadError } = await supabaseAdmin.storage
       .from("papers")
@@ -95,30 +100,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 创建数据库记录（使用 admin 客户端绕过 RLS）
+    // 服务端使用 admin 写入，但文档归属由已验证的 session user 固定。
     const paperTitle = file.name.replace(/\.pdf$/i, "");
 
-    const { data: paper, error: insertError } = await supabaseAdmin
-      .from("documents")
-      .insert({
-        user_id: null,
-        title: paperTitle,
-        filename: file.name,
-        storage_path: storagePath,
-        file_size: file.size,
-        status: "processing",
-      })
-      .select()
-      .single();
+    const { data: papers, error: insertError } = await supabaseAdmin.rpc("create_document_with_index_job", {
+      p_user_id: user.id, p_title: paperTitle, p_filename: file.name,
+      p_storage_path: storagePath, p_file_size: file.size,
+    });
+    const paper = papers?.[0];
 
-    if (insertError) {
+    if (insertError || !paper) {
       console.error(
-        `[POST /api/upload] 创建文档记录失败: ${insertError.message}`
+        `[POST /api/upload] 创建文档记录失败: ${insertError?.message ?? "未返回文档"}`
       );
       // 尝试清理已上传的文件
       await supabaseAdmin.storage.from("papers").remove([storagePath]);
       return NextResponse.json(
-        { error: "创建论文记录失败", details: insertError.message },
+        { error: "创建论文记录失败，请确认已执行数据库迁移" },
         { status: 500 }
       );
     }
@@ -126,13 +124,7 @@ export async function POST(request: NextRequest) {
     // 让 Next.js 在响应发送后继续等待索引任务
     after(async () => {
       try {
-        const result = await runIndexPipeline({
-          documentId: paper.id,
-          pdfBuffer: indexBuffer,
-        });
-        if (!result.success) {
-          console.error("[POST /api/upload] 索引失败 (paperId=" + paper.id + "): " + result.error);
-        }
+        await runNextIndexJob(paper.id);
       } catch (error) {
         console.error("[POST /api/upload] 后台索引异常 (paperId=" + paper.id + "):", error);
       }
