@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { supabase } from "@/lib/supabase/client";
 
 const NAV_LINKS = [
   { href: "/", label: "首页", icon: HomeIcon },
@@ -13,6 +15,22 @@ const NAV_LINKS = [
 
 export function AppHeader() {
   const pathname = usePathname();
+  const router = useRouter();
+  const [email, setEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? null));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setEmail(session?.user.email ?? null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  async function handleSignOut() {
+    await supabase.auth.signOut();
+    router.replace("/login");
+    router.refresh();
+  }
 
   return (
     <header className="sticky top-0 z-40 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -69,6 +87,14 @@ export function AppHeader() {
 
         {/* Spacer */}
         <div className="flex-1" />
+        {email ? (
+          <div className="flex items-center gap-3">
+            <span className="hidden max-w-40 truncate text-xs text-muted-foreground sm:inline">{email}</span>
+            <Button variant="ghost" size="sm" onClick={handleSignOut}>退出</Button>
+          </div>
+        ) : (
+          <Link href="/login"><Button variant="outline" size="sm">登录</Button></Link>
+        )}
       </div>
     </header>
   );

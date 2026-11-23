@@ -1,23 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getAuthenticatedUser } from "@/lib/auth/user";
 
 /**
  * GET /api/papers
- * 获取论文列表（开发模式：无认证，使用 admin 客户端）
+ * 获取当前已验证用户的论文列表
  *
  * Query params:
  * - status: 按状态筛选 (processing | ready | error)
  */
 export async function GET(request: NextRequest) {
   try {
+    const user = await getAuthenticatedUser();
+    if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
+
     // 获取筛选参数
     const { searchParams } = request.nextUrl;
     const statusFilter = searchParams.get("status");
 
-    // 查询论文（admin 客户端绕过 RLS）
+    // 管理员客户端不依赖 RLS，因此必须固定过滤已验证的 user.id。
     let query = supabaseAdmin
       .from("documents")
       .select("*")
+      .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
     if (statusFilter) {
@@ -47,48 +52,8 @@ export async function GET(request: NextRequest) {
 
 /**
  * POST /api/papers
- * 创建新的论文记录（不包含文件上传，仅创建元数据）
+ * 禁用旧的元数据创建入口，防止客户端伪造 Storage 路径。
  */
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const { title, filename, storage_path, file_size } = body;
-
-    if (!title || !filename || !storage_path) {
-      return NextResponse.json(
-        { error: "缺少必要字段: title, filename, storage_path" },
-        { status: 400 }
-      );
-    }
-
-    const { data, error } = await supabaseAdmin
-      .from("documents")
-      .insert({
-        user_id: null,
-        title,
-        filename,
-        storage_path,
-        file_size: file_size || null,
-        status: "processing",
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error(`[POST /api/papers] 创建失败: ${error.message}`);
-      return NextResponse.json(
-        { error: "创建论文记录失败", details: error.message },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ paper: data }, { status: 201 });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "未知错误";
-    console.error(`[POST /api/papers] 异常: ${message}`);
-    return NextResponse.json(
-      { error: "服务器内部错误" },
-      { status: 500 }
-    );
-  }
+export async function POST() {
+  return NextResponse.json({ error: "请使用 /api/upload 上传文件并创建论文" }, { status: 405 });
 }

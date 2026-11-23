@@ -6,8 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint src next.config.ts eslint.config.mjs",
-    "test": "node --test tests/pdf-parse.test.cjs",
+    "lint": "eslint src scripts next.config.ts eslint.config.mjs",
+    "test": "node --test tests/*.test.cjs",
+    "worker": "tsx scripts/index-worker.ts",
+    "db:migrate": "tsx scripts/migrate.ts",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
@@ -39,14 +41,19 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.17",
+    "@electric-sql/pglite-pgvector": "^0.0.18",
     "@types/node": "^22.10.0",
     "@types/pdf-parse": "^1.1.4",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "eslint": "^9.16.0",
     "eslint-config-next": "^15.1.0",
+    "pg": "^8.23.1",
     "postcss": "^8.5.15",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.0"
   }
 }

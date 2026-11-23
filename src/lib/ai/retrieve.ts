@@ -1,5 +1,5 @@
 import { embedText, EMBEDDING_MODEL } from "./embed";
-import { supabaseAdmin } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import type { ChunkMetadata, RetrievalResult } from "@/types";
 
 /**
@@ -38,11 +38,20 @@ export async function retrieveRelevantChunks(
     similarityThreshold = DEFAULT_SIMILARITY_THRESHOLD,
   } = options;
 
+  if (!documentId) throw new Error("检索必须指定论文 ID");
+  const supabase = await createClient();
+  const { data: userData, error: authError } = await supabase.auth.getUser();
+  if (authError || !userData.user) throw new Error("请先登录");
+  const { data: paper, error: paperError } = await supabase.from("documents")
+    .select("id,status").eq("id", documentId).eq("user_id", userData.user.id).maybeSingle();
+  if (paperError || !paper) throw new Error("论文不存在");
+  if (paper.status !== "ready") throw new Error("论文还未完成索引");
+
   // 步骤 1: 向量化查询
   const queryEmbedding = await embedText(query);
 
   // 步骤 2: 调用 pgvector RPC 函数
-  const { data, error } = await supabaseAdmin.rpc("search_document_chunks", {
+  const { data, error } = await supabase.rpc("search_document_chunks", {
     query_embedding: queryEmbedding,
     match_document_id: documentId || null,
     match_count: limit,

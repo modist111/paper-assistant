@@ -21,6 +21,8 @@ function PaperDetailContent({
   const [paper, setPaper] = useState<Paper | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  const [job, setJob] = useState<{ step: string; attempts: number; max_attempts: number; completed_chunks: number; total_chunks: number } | null>(null);
   const isProcessing = paper?.status === "processing";
 
   // 加载论文详情
@@ -32,6 +34,7 @@ function PaperDetailContent({
         if (!res.ok) throw new Error("论文不存在");
         const data = await res.json();
         setPaper(data.paper);
+        setJob(data.job ?? null);
       } catch (err) {
         setError(err instanceof Error ? err.message : "加载失败");
       } finally {
@@ -51,6 +54,7 @@ function PaperDetailContent({
         if (!res.ok) return;
         const data = await res.json();
         setPaper(data.paper);
+        setJob(data.job ?? null);
         if (data.paper.status !== "processing") {
           clearInterval(interval);
         }
@@ -63,6 +67,20 @@ function PaperDetailContent({
   }, [isProcessing, id]);
 
   // 删除论文
+  async function handleRetry() {
+    setRetrying(true);
+    try {
+      const response = await fetch(`/api/papers/${id}/retry`, { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "重试失败");
+      setPaper((previous) => previous ? { ...previous, status: "processing", error_message: null, retry_available: false } : previous);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "重试失败");
+    } finally {
+      setRetrying(false);
+    }
+  }
+
   async function handleDelete() {
     if (!confirm("确定要删除这篇论文吗？")) return;
 
@@ -135,7 +153,8 @@ function PaperDetailContent({
                 论文正在处理中
               </p>
               <p className="text-sm text-amber-700 dark:text-amber-300">
-                正在提取文本、生成向量嵌入，请稍候...
+                {job ? `${({ queued: "等待处理", downloading: "读取文件", parsing: "提取文本", chunking: "文本分块", embedding: "生成向量", publishing: "保存索引", retry_wait: "等待自动重试" } as Record<string, string>)[job.step] ?? "正在处理"} · 第 ${job.attempts}/${job.max_attempts} 次尝试` : "正在准备索引..."}
+                {job && job.total_chunks > 0 && ` · ${job.completed_chunks}/${job.total_chunks} 个文本块`}
               </p>
             </div>
           </div>
@@ -150,6 +169,13 @@ function PaperDetailContent({
               {paper.error_message}
             </p>
           )}
+        </div>
+      )}
+
+      {paper.retry_available && (
+        <div className="mb-6 rounded-lg border p-4">
+          <p className="mb-3 text-sm text-muted-foreground">处理失败或已中断，可以重新开始索引。</p>
+          <Button onClick={handleRetry} disabled={retrying}>{retrying ? "正在提交..." : "重新处理"}</Button>
         </div>
       )}
 
